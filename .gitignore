@@ -1,0 +1,30 @@
+# PlatformIO build system
+.pio/
+.pioenvs/
+.piolibdeps/
+.pio/libdeps/
+.pio/build/
+
+# VS Code / PlatformIO IDE settings
+.vscode/
+.idea/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# PlatformIO project metadata (local environment stuff)
+.ccls-cache/
+.clangd/
+*.code-workspace
+
+# Backup / temp files
+*.swp
+*.swo
+*.bak
