@@ -19,8 +19,6 @@ static const int HOR_RES = 480;
 static const int VER_RES = 320;
 
 /* ======== Touch transform config (tweak if needed) ======== */
-// Most ESP32-3248S035C units in landscape need SWAP_XY.
-// If touches look mirrored, flip INVERT_X and/or INVERT_Y.
 static bool TOUCH_SWAP_XY = true;
 static bool TOUCH_INVERT_X = false;
 static bool TOUCH_INVERT_Y = false;
@@ -54,7 +52,7 @@ public:
     if (read(0x8048, xy, 4)) {
       _xMax = (uint16_t)xy[0] | ((uint16_t)xy[1] << 8);
       _yMax = (uint16_t)xy[2] | ((uint16_t)xy[3] << 8);
-      if (_xMax == 0 || _yMax == 0) { _xMax = 480; _yMax = 320; } // fallback
+      if (_xMax == 0 || _yMax == 0) { _xMax = 480; _yMax = 320; }
     } else {
       _xMax = 480; _yMax = 320;
     }
@@ -63,40 +61,32 @@ public:
   }
 
   bool getPoint(uint16_t &x, uint16_t &y, bool &pressed) {
-    // Status @ 0x814E: bit7=1 data ready, low nibble = points
     uint8_t status = 0;
     if (!read8(0x814E, status)) { pressed = false; return false; }
     uint8_t n = status & 0x0F;
     pressed = ((status & 0x80) && (n > 0));
     if (!pressed) { write8(0x814E, 0x00); return true; }
 
-    // First point (P1) base @ 0x8150
+    // First point (P1)
     uint8_t buf[6];
     if (!read(0x8150, buf, sizeof(buf))) { pressed = false; return false; }
     uint16_t rx = ((uint16_t)buf[1] << 8) | buf[0];
     uint16_t ry = ((uint16_t)buf[3] << 8) | buf[2];
 
-    // -------- Transform to LVGL coordinates --------
-    // 1) optional swap
+    // Transform
     uint16_t tx = rx, ty = ry;
     if (TOUCH_SWAP_XY) { uint16_t t = tx; tx = ty; ty = t; }
-
-    // 2) optional invert (apply before scaling)
     if (TOUCH_INVERT_X) tx = (_xMax > 0 ? (_xMax - 1 - tx) : tx);
     if (TOUCH_INVERT_Y) ty = (_yMax > 0 ? (_yMax - 1 - ty) : ty);
 
-    // 3) scale native -> LVGL resolution
-    // Protect against div0
     uint32_t sx = (_xMax > 1) ? (uint32_t)tx * (HOR_RES - 1) / (_xMax - 1) : tx;
     uint32_t sy = (_yMax > 1) ? (uint32_t)ty * (VER_RES - 1) / (_yMax - 1) : ty;
 
     x = (uint16_t)min<uint32_t>(sx, HOR_RES - 1);
     y = (uint16_t)min<uint32_t>(sy, VER_RES - 1);
 
-    // Clear ready flag
-    write8(0x814E, 0x00);
+    write8(0x814E, 0x00);  // clear ready flag
 
-    // Debug raw/mapped
     static uint32_t lastPrint = 0;
     uint32_t now = millis();
     if (now - lastPrint > 300) {
@@ -117,26 +107,20 @@ private:
 
   bool probe() {
     uint8_t id[4] = {0};
-    return read(0x8140, id, 4);  // enough to confirm ACK
+    return read(0x8140, id, 4); // ACK is enough
   }
 
   bool write8(uint16_t reg, uint8_t val) {
     _wire->beginTransmission(_addr);
-    _wire->write(reg >> 8);
-    _wire->write(reg & 0xFF);
-    _wire->write(val);
+    _wire->write(reg >> 8); _wire->write(reg & 0xFF); _wire->write(val);
     return (_wire->endTransmission() == 0);
   }
 
-  bool read8(uint16_t reg, uint8_t &val) {
-    if (!read(reg, &val, 1)) return false;
-    return true;
-  }
+  bool read8(uint16_t reg, uint8_t &val) { return read(reg, &val, 1); }
 
   bool read(uint16_t reg, uint8_t *buf, size_t len) {
     _wire->beginTransmission(_addr);
-    _wire->write(reg >> 8);
-    _wire->write(reg & 0xFF);
+    _wire->write(reg >> 8); _wire->write(reg & 0xFF);
     if (_wire->endTransmission(false) != 0) return false;
     size_t got = _wire->requestFrom((int)_addr, (int)len);
     if (got != len) return false;
@@ -151,10 +135,7 @@ static GT911 touch;
 static void indev_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
   (void)indev;
   uint16_t x, y; bool pressed;
-  if (!touch.getPoint(x, y, pressed)) {
-    data->state = LV_INDEV_STATE_RELEASED;
-    return;
-  }
+  if (!touch.getPoint(x, y, pressed)) { data->state = LV_INDEV_STATE_RELEASED; return; }
   data->point.x = (lv_coord_t)x;
   data->point.y = (lv_coord_t)y;
   data->state   = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
@@ -176,19 +157,31 @@ static void my_flush_cb(lv_display_t *d, const lv_area_t *area, uint8_t *px_map)
   lv_display_flush_ready(d);
 }
 
+/* ---- Toast auto-close timer (C callback, not a lambda) ---- */
+static void toast_close_cb(lv_timer_t *t) {
+  lv_obj_t *mbox = (lv_obj_t*)lv_timer_get_user_data(t);
+  if (mbox) lv_obj_del(mbox);
+  lv_timer_del(t);
+}
+
 /* ---- Button click handler ---- */
 static void btn_clicked(lv_event_t *e) {
   lv_obj_t *btn = lv_event_get_target(e);
-  const char *txt = lv_label_get_text(lv_obj_get_child(btn, 0));
+  lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+  const char *txt = lbl ? lv_label_get_text(lbl) : "Button";
+
   Serial.printf("[UI] Clicked: %s\n", txt);
 
-  // Simple toast
-  lv_obj_t *m = lv_msgbox_create(nullptr, "Tapped", txt, nullptr, true);
+  // LVGL 9: create msgbox, then add title/text/close button
+  lv_obj_t *m = lv_msgbox_create(NULL);
+  lv_msgbox_add_title(m, "Tapped");
+  lv_msgbox_add_text(m, txt);
+  lv_msgbox_add_close_button(m);
   lv_obj_center(m);
-  lv_timer_t *t = lv_timer_create([](lv_timer_t *t){
-    lv_obj_del((lv_obj_t*)t->user_data);
-    lv_timer_del(t);
-  }, 900, m);
+
+  // Auto-close in ~900 ms
+  lv_timer_t *tmr = lv_timer_create(toast_close_cb, 900, m);
+  (void)tmr; // tmr is owned by LVGL
 }
 
 /* ---- Home screen ---- */
