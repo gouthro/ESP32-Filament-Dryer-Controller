@@ -2,6 +2,12 @@
 
 Firmware for a custom **4-spool filament storage/dryer** with a target chamber temperature of up to **75 °C**, running on an **ESP32-3248S035C** development board with a **3.5" ST7796 TFT capacitive touchscreen (GT911)**.
 
+---
+
+<h1 align="center">Currently in development and not fully functional yet.</h1>
+
+---
+
 This project uses:
 
 - [LVGL 9.x](https://lvgl.io/) for GUI
