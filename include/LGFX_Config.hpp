@@ -24,7 +24,7 @@ public:
 
     auto p = _panel.config();
     p.pin_cs   = PIN_TFT_CS;
-    p.pin_rst  = PIN_TFT_RST;   // -1 means tied to EN/3V3
+    p.pin_rst  = PIN_TFT_RST;
     p.pin_busy = -1;
     p.panel_width  = 320;
     p.panel_height = 480;
